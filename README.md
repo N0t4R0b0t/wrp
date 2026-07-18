@@ -93,6 +93,42 @@ used with PNG and lots of memory on a client side.
 
 WRP supports customizing it's own UI using HTML Template file. Download [wrp.html](wrp.html) place in the same directory with wrp binary customize it to your liking.
 
+## Proxmox VE LXC
+
+Create an unprivileged Debian 12 LXC container on a Proxmox VE host, install
+Go, Chromium and wrp, and set it up as a systemd service. Run this on the
+Proxmox host shell:
+
+```shell
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/N0t4R0b0t/wrp/master/ct/wrp.sh)"
+```
+
+Re-run the same command later to update an existing `wrp` container in place
+(git pull, rebuild, restart the service) instead of creating a new one.
+
+Useful environment overrides (set before the command above):
+
+```text
+CT_ID          container ID (default: next free ID)
+CT_HOSTNAME    container hostname (default: wrp)
+CT_DISK_GB     root disk size in GB (default: 6)
+CT_CORES       CPU cores (default: 2)
+CT_RAM_MB      memory in MB (default: 2048)
+CT_BRIDGE      network bridge (default: vmbr0)
+CT_STORAGE     storage for the container rootfs (default: local-lvm)
+WRP_LISTEN     wrp listen address:port (default: :8080)
+```
+
+Example, creating on a specific bridge with more RAM:
+
+```shell
+CT_BRIDGE=vmbr1 CT_RAM_MB=4096 bash -c "$(curl -fsSL https://raw.githubusercontent.com/N0t4R0b0t/wrp/master/ct/wrp.sh)"
+```
+
+See [ct/wrp.sh](ct/wrp.sh) (host-side, creates/updates the container) and
+[install/wrp-install.sh](install/wrp-install.sh) (runs inside the container,
+handles both install and update).
+
 ## Docker
 
 https://hub.docker.com/r/tenox7/wrp
