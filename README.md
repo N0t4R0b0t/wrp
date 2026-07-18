@@ -125,6 +125,11 @@ Example, creating on a specific bridge with more RAM:
 CT_BRIDGE=vmbr1 CT_RAM_MB=4096 bash -c "$(curl -fsSL https://raw.githubusercontent.com/N0t4R0b0t/wrp/master/ct/wrp.sh)"
 ```
 
+The container gets a couple of conveniences: a colored banner on login shows
+the IP, browse URL, log command and update command, and `wrp-update` is
+available inside the container to update in place without going back to the
+Proxmox host.
+
 See [ct/wrp.sh](ct/wrp.sh) (host-side, creates/updates the container) and
 [install/wrp-install.sh](install/wrp-install.sh) (runs inside the container,
 handles both install and update).

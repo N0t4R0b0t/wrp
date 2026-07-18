@@ -125,12 +125,45 @@ EOF
   msg_ok "systemd unit written"
 }
 
+create_login_banner() {
+  msg_info "Writing console login banner"
+  cat >/etc/profile.d/00_wrp-details.sh <<PROFILE
+[ -t 1 ] || return 0
+
+_ip=\$(hostname -I 2>/dev/null | awk '{print \$1}')
+_os=\$(. /etc/os-release 2>/dev/null; echo "\${PRETTY_NAME:-Linux}")
+
+echo ""
+echo -e "\033[1;92mwrp - Web Rendering Proxy LXC Container\033[m"
+echo -e "    🌐   Provided by: N0t4R0b0t | GitHub: \033[36mhttps://github.com/N0t4R0b0t/wrp\033[m"
+echo ""
+echo -e "    🖥️   OS: \033[1;92m\${_os}\033[m"
+echo -e "    🏠   Hostname: \033[1;92m\$(hostname)\033[m"
+echo -e "    💡   IP Address: \033[1;92m\${_ip}\033[m"
+echo ""
+echo -e "    📦   Browse to:  \033[36mhttp://\${_ip}${WRP_LISTEN}\033[m"
+echo ""
+echo -e "    💾   Source:     ${WRP_DIR}"
+echo -e "    📋   Logs:       journalctl -u wrp -f"
+echo -e "    🔄   Update:     wrp-update"
+echo ""
+PROFILE
+  chmod +x /etc/profile.d/00_wrp-details.sh
+  msg_ok "Login banner installed"
+}
+
+expose_update_command() {
+  ln -sf "$WRP_DIR/install/wrp-install.sh" /usr/local/bin/wrp-update
+}
+
 do_install() {
   install_dependencies
   install_go
   sync_source
   build_wrp
   create_service
+  create_login_banner
+  expose_update_command
   systemctl enable --now wrp.service
   msg_ok "wrp installed and started"
 }
@@ -140,6 +173,8 @@ do_update() {
   sync_source
   build_wrp
   create_service
+  create_login_banner
+  expose_update_command
   systemctl restart wrp.service
   msg_ok "wrp updated and restarted"
 }

@@ -113,7 +113,13 @@ report() {
   local ctid=$1
   local ip
   ip=$(pct exec "$ctid" -- hostname -I 2>/dev/null | awk '{print $1}')
-  echo -e "\n${GN}Done.${CL} Container ${ctid} (${CT_HOSTNAME}) - wrp listening on http://${ip}${WRP_LISTEN}\n"
+  cat <<EOF
+
+${GN}Done.${CL} Container ${ctid} (${CT_HOSTNAME}) - wrp listening on http://${ip}${WRP_LISTEN}
+
+Update later with:  bash -c "\$(curl -fsSL https://raw.githubusercontent.com/N0t4R0b0t/wrp/master/ct/wrp.sh)"   (from the PVE host)
+             or:    wrp-update                                                                                 (from inside the container)
+EOF
 }
 
 main() {
