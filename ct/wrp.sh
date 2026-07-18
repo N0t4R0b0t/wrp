@@ -102,11 +102,16 @@ create_container() {
 }
 
 run_install_script() {
-  local ctid=$1 mode=$2
-  msg_info "Running wrp $mode inside container $ctid"
+  local ctid=$1
+  msg_info "Running wrp installer inside container $ctid"
+  # Deliberately don't force install|update here: a container matching our
+  # tag may exist but never have finished provisioning (e.g. a prior run
+  # failed after `pct create`). Let wrp-install.sh self-detect from whether
+  # /opt/wrp exists, so a half-finished container still gets a full install
+  # instead of a skip-dependencies "update".
   pct exec "$ctid" -- env "WRP_LISTEN=${WRP_LISTEN}" \
-    bash -c "curl -fsSL '${INSTALL_SCRIPT_URL}' -o /tmp/wrp-install.sh && bash /tmp/wrp-install.sh '${mode}'"
-  msg_ok "wrp $mode finished"
+    bash -c "wget -qO /tmp/wrp-install.sh '${INSTALL_SCRIPT_URL}' && bash /tmp/wrp-install.sh"
+  msg_ok "wrp installer finished"
 }
 
 report() {
@@ -127,15 +132,15 @@ main() {
   local existing
   existing=$(find_existing_ctid || true)
   if [[ -n "$existing" ]]; then
-    msg_info "Found existing container '${CT_HOSTNAME}' (CTID ${existing}) - updating"
-    run_install_script "$existing" update
+    msg_info "Found existing container '${CT_HOSTNAME}' (CTID ${existing})"
+    run_install_script "$existing"
     report "$existing"
     return
   fi
 
   local ctid="${CT_ID:-$(next_ctid)}"
   create_container "$ctid"
-  run_install_script "$ctid" install
+  run_install_script "$ctid"
   report "$ctid"
 }
 
