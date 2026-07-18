@@ -27,7 +27,8 @@ CT_BRIDGE="${CT_BRIDGE:-vmbr0}"
 CT_STORAGE="${CT_STORAGE:-local-lvm}"
 CT_PASSWORD="${CT_PASSWORD:-}"
 WRP_LISTEN="${WRP_LISTEN:-:8080}"
-INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/N0t4R0b0t/wrp/master/install/wrp-install.sh"
+INSTALL_REF="${INSTALL_REF:-master}"
+INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/N0t4R0b0t/wrp/${INSTALL_REF}/install/wrp-install.sh"
 
 require_pve() {
   if ! command -v pct >/dev/null 2>&1; then
