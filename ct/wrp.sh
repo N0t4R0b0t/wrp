@@ -117,15 +117,20 @@ run_install_script() {
 
 report() {
   local ctid=$1
-  local ip
+  local ip msg
   ip=$(pct exec "$ctid" -- hostname -I 2>/dev/null | awk '{print $1}')
-  cat <<EOF
+  # Captured then printed with `printf %b` rather than `cat` directly: a
+  # heredoc emits bytes verbatim, so the \033[...] in $GN/$CL would otherwise
+  # show up as literal text instead of color.
+  msg=$(cat <<EOF
 
 ${GN}Done.${CL} Container ${ctid} (${CT_HOSTNAME}) - wrp listening on http://${ip}${WRP_LISTEN}
 
 Update later with:  bash -c "\$(curl -fsSL https://raw.githubusercontent.com/N0t4R0b0t/wrp/master/ct/wrp.sh)"   (from the PVE host)
              or:    wrp-update                                                                                 (from inside the container)
 EOF
+)
+  printf '%b\n' "$msg"
 }
 
 main() {
