@@ -23,7 +23,7 @@
 
 set -Eeuo pipefail
 
-RD='\033[0;31m'; GN='\033[0;32m'; YW='\033[1;33m'; CL='\033[0m'
+RD=$'\033[0;31m'; GN=$'\033[0;32m'; YW=$'\033[1;33m'; CL=$'\033[0m'
 msg_info()  { echo -e " ${YW}➜${CL} $1"; }
 msg_ok()    { echo -e " ${GN}✔${CL} $1"; }
 msg_error() { echo -e " ${RD}✘${CL} $1" >&2; }
