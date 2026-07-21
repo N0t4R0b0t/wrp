@@ -2,3 +2,4 @@ wrp-*
 wrp
 wrp.exe
 statik
+!install/wrp-install.sh
