@@ -125,6 +125,25 @@ EOF
   msg_ok "systemd unit written"
 }
 
+setup_autologin() {
+  msg_info "Enabling console autologin"
+  grep -qxF "export TERM='xterm-256color'" /root/.bashrc \
+    || echo "export TERM='xterm-256color'" >>/root/.bashrc
+
+  [[ -d /etc/update-motd.d ]] && chmod -x /etc/update-motd.d/* 2>/dev/null || true
+
+  local GETTY_OVERRIDE=/etc/systemd/system/container-getty@1.service.d/override.conf
+  mkdir -p "$(dirname "$GETTY_OVERRIDE")"
+  cat >"$GETTY_OVERRIDE" <<'EOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud tty%I 115200,38400,9600 $TERM
+EOF
+  systemctl daemon-reload
+  systemctl restart "container-getty@1" 2>/dev/null || true
+  msg_ok "Console autologin enabled"
+}
+
 create_login_banner() {
   msg_info "Writing console login banner"
   cat >/etc/profile.d/00_wrp-details.sh <<PROFILE
@@ -142,6 +161,7 @@ echo -e "    🏠   Hostname: \033[1;92m\$(hostname)\033[m"
 echo -e "    💡   IP Address: \033[1;92m\${_ip}\033[m"
 echo ""
 echo -e "    📦   Browse to:  \033[36mhttp://\${_ip}${WRP_LISTEN}\033[m"
+echo -e "    🔀   Proxy PAC:  \033[36mhttp://\${_ip}${WRP_LISTEN}/proxy.pac\033[m"
 echo ""
 echo -e "    💾   Source:     ${WRP_DIR}"
 echo -e "    📋   Logs:       journalctl -u wrp -f"
@@ -163,6 +183,7 @@ do_install() {
   build_wrp
   create_service
   create_login_banner
+  setup_autologin
   expose_update_command
   systemctl enable --now wrp.service
   msg_ok "wrp installed and started"
@@ -174,6 +195,7 @@ do_update() {
   build_wrp
   create_service
   create_login_banner
+  setup_autologin
   expose_update_command
   systemctl restart wrp.service
   msg_ok "wrp updated and restarted"

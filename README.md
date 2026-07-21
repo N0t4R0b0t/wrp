@@ -134,6 +134,10 @@ See [ct/wrp.sh](ct/wrp.sh) (host-side, creates/updates the container) and
 [install/wrp-install.sh](install/wrp-install.sh) (runs inside the container,
 handles both install and update).
 
+For a fuller walkthrough — env var reference, updating, checking logs,
+adjusting flags after install, and troubleshooting — see
+[docs/proxmox-install.md](docs/proxmox-install.md).
+
 ## Docker
 
 https://hub.docker.com/r/tenox7/wrp
