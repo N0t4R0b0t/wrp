@@ -5,10 +5,19 @@
 # Run on the Proxmox VE host:
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/N0t4R0b0t/wrp/master/ct/wrp.sh)"
 #
-# Re-running against a hostname that already exists updates it in place
-# (git pull + rebuild + restart service) instead of creating a new container.
+# When creating a new container, the script prompts interactively for
+# hostname, resources, network bridge, and storage (offering a menu of
+# whatever's actually available on this host, rather than assuming
+# defaults like `local-lvm` that may not exist). Re-running against a
+# hostname that already exists always skips straight to updating it in
+# place (git pull + rebuild + restart service) instead of creating a new
+# container, with no prompts.
 #
-# Env overrides:
+# If stdin isn't a terminal (e.g. driven from another script), prompts are
+# skipped and the env vars below (or their defaults) are used directly.
+#
+# Env overrides (also used as the pre-filled defaults in interactive
+# prompts):
 #   CT_ID, CT_HOSTNAME, CT_DISK_GB, CT_CORES, CT_RAM_MB, CT_BRIDGE,
 #   CT_STORAGE, CT_PASSWORD, WRP_LISTEN
 
@@ -24,17 +33,191 @@ CT_DISK_GB="${CT_DISK_GB:-6}"
 CT_CORES="${CT_CORES:-2}"
 CT_RAM_MB="${CT_RAM_MB:-2048}"
 CT_BRIDGE="${CT_BRIDGE:-vmbr0}"
-CT_STORAGE="${CT_STORAGE:-local-lvm}"
+CT_STORAGE="${CT_STORAGE:-}"
 CT_PASSWORD="${CT_PASSWORD:-}"
 WRP_LISTEN="${WRP_LISTEN:-:8080}"
 INSTALL_REF="${INSTALL_REF:-master}"
 INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/N0t4R0b0t/wrp/${INSTALL_REF}/install/wrp-install.sh"
+
+CHOICE=""
+STORAGE_RESULT=""
 
 require_pve() {
   if ! command -v pct >/dev/null 2>&1; then
     msg_error "pct not found - this script must run on a Proxmox VE host."
     exit 1
   fi
+}
+
+# ── Interactive helpers ──────────────────────────────────────────────────────
+confirm() {
+  # confirm "Question?" -> 0 (yes) or 1 (no/blank)
+  local ans
+  while true; do
+    read -rp " ${YW}$1${CL} [y/N] " ans
+    case "$ans" in
+      [Yy]*) return 0 ;;
+      [Nn]*|"") return 1 ;;
+      *) echo "   Please answer y or n." ;;
+    esac
+  done
+}
+
+choose() {
+  # choose "prompt" opt1 opt2 ... -> sets CHOICE to the selected 1-based index
+  local prompt="$1"; shift
+  local opts=("$@")
+  echo -e " ${YW}${prompt}${CL}"
+  local i
+  for i in "${!opts[@]}"; do
+    printf "   %d) %s\n" "$((i + 1))" "${opts[$i]}"
+  done
+  local sel
+  while true; do
+    read -rp "   Selection: " sel
+    if [[ "$sel" =~ ^[0-9]+$ ]] && (( sel >= 1 && sel <= ${#opts[@]} )); then
+      CHOICE=$sel
+      return
+    fi
+    echo "   Invalid selection."
+  done
+}
+
+prompt_default() {
+  # prompt_default "Question" "default" -> echoes the answer, or default if blank
+  local ans
+  read -rp " ${YW}$1${CL} [$2]: " ans
+  echo "${ans:-$2}"
+}
+
+prompt_number() {
+  # prompt_number "Question" "default" -> echoes a validated positive integer
+  local ans
+  while true; do
+    read -rp " ${YW}$1${CL} [$2]: " ans
+    ans="${ans:-$2}"
+    if [[ "$ans" =~ ^[0-9]+$ ]]; then
+      echo "$ans"
+      return
+    fi
+    echo "   Please enter a number." >&2
+  done
+}
+
+prompt_ctid() {
+  # prompt_ctid "default" -> echoes a validated, currently-unused CTID
+  local default="$1" ans
+  while true; do
+    read -rp " ${YW}Container ID${CL} [${default}]: " ans
+    ans="${ans:-$default}"
+    if ! [[ "$ans" =~ ^[0-9]+$ ]]; then
+      echo "   Please enter a number." >&2
+      continue
+    fi
+    if pct status "$ans" >/dev/null 2>&1; then
+      echo "   CTID ${ans} already exists, choose another." >&2
+      continue
+    fi
+    echo "$ans"
+    return
+  done
+}
+
+# select_storage <content-type> <label> -> sets STORAGE_RESULT
+# Lists storages Proxmox reports as active for the given content type
+# (e.g. "rootdir" for container disks, "vztmpl" for templates). Prompts
+# interactively when there's more than one and stdin is a terminal;
+# otherwise picks the first one and says so.
+select_storage() {
+  local content="$1" label="$2"
+  local -a names=() display=()
+  local name type total used free
+  while read -r name type _ total used free _; do
+    [[ -n "$name" && -n "$type" ]] || continue
+    local free_fmt used_fmt
+    free_fmt=$(numfmt --to=iec --from-unit=1024 --format "%.1f" <<<"$free" 2>/dev/null || echo "${free}K")
+    used_fmt=$(numfmt --to=iec --from-unit=1024 --format "%.1f" <<<"$used" 2>/dev/null || echo "${used}K")
+    names+=("$name")
+    display+=("${name}  (${type}, free ${free_fmt}B, used ${used_fmt}B)")
+  done < <(pvesm status -content "$content" 2>/dev/null | awk 'NR>1 && $3=="active"')
+
+  if [[ ${#names[@]} -eq 0 ]]; then
+    msg_error "No active storage found for content type '${content}'. Check 'pvesm status -content ${content}'."
+    exit 1
+  fi
+
+  if [[ ${#names[@]} -eq 1 ]]; then
+    STORAGE_RESULT="${names[0]}"
+    return
+  fi
+
+  if [[ -t 0 ]]; then
+    choose "${label} - select storage:" "${display[@]}"
+    STORAGE_RESULT="${names[$((CHOICE - 1))]}"
+  else
+    STORAGE_RESULT="${names[0]}"
+    msg_info "Non-interactive: defaulting ${label} storage to '${STORAGE_RESULT}' (other options: ${names[*]:1})"
+  fi
+}
+
+resolve_ct_storage() {
+  # Honors an explicit CT_STORAGE env override if it's actually valid,
+  # otherwise selects interactively (or picks automatically, non-interactively).
+  if [[ -n "$CT_STORAGE" ]]; then
+    if pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && $3=="active"{print $1}' | grep -qx "$CT_STORAGE"; then
+      return
+    fi
+    msg_error "CT_STORAGE='${CT_STORAGE}' is not an active storage for container disks - ignoring it."
+  fi
+  select_storage rootdir "Container rootfs"
+  CT_STORAGE="$STORAGE_RESULT"
+}
+
+list_bridges() {
+  local b
+  for b in /sys/class/net/*/; do
+    [[ -d "${b}bridge" ]] || continue
+    basename "$b"
+  done
+}
+
+configure_interactive() {
+  echo -e "\n${GN}Configure the new wrp container${CL} (Enter accepts the default shown)\n"
+  CT_HOSTNAME=$(prompt_default "Hostname" "$CT_HOSTNAME")
+  CT_ID=$(prompt_ctid "${CT_ID:-$(next_ctid)}")
+  CT_CORES=$(prompt_number "CPU cores" "$CT_CORES")
+  CT_RAM_MB=$(prompt_number "Memory (MB)" "$CT_RAM_MB")
+  CT_DISK_GB=$(prompt_number "Disk size (GB)" "$CT_DISK_GB")
+
+  local -a bridges=()
+  mapfile -t bridges < <(list_bridges)
+  if [[ ${#bridges[@]} -eq 0 ]]; then
+    CT_BRIDGE=$(prompt_default "Network bridge" "$CT_BRIDGE")
+  elif [[ ${#bridges[@]} -eq 1 ]]; then
+    CT_BRIDGE="${bridges[0]}"
+    msg_ok "Network bridge: ${CT_BRIDGE}"
+  else
+    choose "Network bridge:" "${bridges[@]}"
+    CT_BRIDGE="${bridges[$((CHOICE - 1))]}"
+  fi
+
+  resolve_ct_storage
+  WRP_LISTEN=$(prompt_default "wrp listen address:port" "$WRP_LISTEN")
+
+  read -rsp " ${YW}Root password (blank = random, generated)${CL}: " CT_PASSWORD
+  echo
+
+  echo -e "\n${YW}Summary:${CL}"
+  echo "   CTID       : ${CT_ID}"
+  echo "   Hostname   : ${CT_HOSTNAME}"
+  echo "   Cores      : ${CT_CORES}"
+  echo "   RAM        : ${CT_RAM_MB} MB"
+  echo "   Disk       : ${CT_DISK_GB} GB"
+  echo "   Bridge     : ${CT_BRIDGE}"
+  echo "   Storage    : ${CT_STORAGE}"
+  echo "   wrp listen : ${WRP_LISTEN}"
+  echo ""
+  confirm "Create the container with these settings?" || { msg_info "Aborted, nothing was created."; exit 0; }
 }
 
 find_existing_ctid() {
@@ -46,7 +229,8 @@ next_ctid() {
 }
 
 ensure_template() {
-  local tmpl_storage="local"
+  select_storage vztmpl "Template"
+  local tmpl_storage="$STORAGE_RESULT"
   local tmpl
   tmpl=$(pveam available --section system 2>/dev/null | awk '/debian-12-standard/{print $2}' | sort -V | tail -1)
   if [[ -z "$tmpl" ]]; then
@@ -144,10 +328,16 @@ main() {
     return
   fi
 
-  local ctid="${CT_ID:-$(next_ctid)}"
-  create_container "$ctid"
-  run_install_script "$ctid"
-  report "$ctid"
+  if [[ -t 0 ]]; then
+    configure_interactive
+  else
+    CT_ID="${CT_ID:-$(next_ctid)}"
+    resolve_ct_storage
+  fi
+
+  create_container "$CT_ID"
+  run_install_script "$CT_ID"
+  report "$CT_ID"
 }
 
 main "$@"

@@ -32,10 +32,10 @@ This will:
 
 1. Verify you're on a PVE host.
 2. Look for an existing container named `wrp` (or your `CT_HOSTNAME`). If
-   found, skip straight to re-running the installer inside it (see
-   [Updating](#updating)).
-3. Otherwise, pick the next free container ID, download the Debian 12
-   template if needed, and create an unprivileged LXC with DHCP networking.
+   found, skip straight to re-running the installer inside it, with no
+   prompts (see [Updating](#updating)).
+3. Otherwise, walk you through an interactive setup (see below), then create
+   an unprivileged LXC with DHCP networking using those answers.
 4. Start the container and wait for its network to come up.
 5. Fetch and run `install/wrp-install.sh` inside the container, which
    installs Chromium/Go/build deps, clones and builds `wrp`, and registers it
@@ -45,9 +45,64 @@ This will:
 The whole process typically takes a few minutes, most of it spent building Go
 and compiling `wrp` inside the container.
 
+### Interactive setup
+
+For a new container, the script prompts for each setting, showing the
+current default in brackets — press Enter to accept it, or type a value to
+override it:
+
+```
+Configure the new wrp container (Enter accepts the default shown)
+
+ Hostname [wrp]:
+ Container ID [117]:
+ CPU cores [2]:
+ Memory (MB) [2048]:
+ Disk size (GB) [6]:
+ Network bridge:
+   1) vmbr0
+   2) vmbr1
+   Selection: 1
+ Container rootfs - select storage:
+   1) local-lvm  (lvmthin, free 120.3GB, used 8.1GB)
+   2) local-zfs  (zfspool, free 400.0GB, used 12.5GB)
+   Selection: 2
+ wrp listen address:port [:8080]:
+ Root password (blank = random, generated):
+
+Summary:
+   CTID       : 117
+   Hostname   : wrp
+   Cores      : 2
+   RAM        : 2048 MB
+   Disk       : 6 GB
+   Bridge     : vmbr0
+   Storage    : local-zfs
+   wrp listen : :8080
+
+ Create the container with these settings? [y/N]
+```
+
+A few things worth knowing:
+
+- **Storage and bridge menus only list what's actually available** on this
+  host (via `pvesm status` / `/sys/class/net/*/bridge`), which is what fixes
+  the old hardcoded `local-lvm` default erroring out on hosts that use ZFS,
+  directory storage, or a differently-named pool. If only one option exists
+  for a given prompt, it's picked automatically without asking.
+- The **container ID prompt rejects an ID that's already in use** and asks
+  again, so a stale/incorrect `CT_ID` can't clash with an existing container.
+- Nothing is created until you confirm the final summary; answering `n` (or
+  just Enter) at that prompt aborts cleanly.
+- If stdin isn't a terminal (e.g. this script is invoked from your own
+  automation), all prompts are skipped and it falls back to the env vars /
+  defaults below — auto-picking the first available storage/bridge if there's
+  more than one and none was specified.
+
 ### Configuration (environment variables)
 
-Set these before the `bash -c "..."` command to override defaults:
+Set these before the `bash -c "..."` command to pre-fill the interactive
+prompts (or, run non-interactively, to use directly with no prompts):
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -57,12 +112,13 @@ Set these before the `bash -c "..."` command to override defaults:
 | `CT_CORES` | `2` | CPU cores |
 | `CT_RAM_MB` | `2048` | Memory, in MB |
 | `CT_BRIDGE` | `vmbr0` | Network bridge |
-| `CT_STORAGE` | `local-lvm` | Storage backend for the container rootfs |
+| `CT_STORAGE` | auto-selected | Storage backend for the container rootfs — if set to a storage that isn't actually active for container disks, it's ignored with a warning and you get the selection prompt/auto-pick instead |
 | `CT_PASSWORD` | random | Root password inside the container (a random one is generated and used if unset — you won't see it printed, so set your own if you need console access) |
 | `WRP_LISTEN` | `:8080` | Address:port `wrp` listens on inside the container |
 | `INSTALL_REF` | `master` | Git ref of `install/wrp-install.sh` to fetch from GitHub — pin this if you want a specific version instead of tracking `master` |
 
-Example — put it on a different bridge with more RAM and cores:
+Example — pre-fill a different bridge with more RAM and cores (still prompts,
+just with these as the shown defaults):
 
 ```shell
 CT_BRIDGE=vmbr1 CT_RAM_MB=4096 CT_CORES=4 bash -c "$(curl -fsSL https://raw.githubusercontent.com/N0t4R0b0t/wrp/master/ct/wrp.sh)"
